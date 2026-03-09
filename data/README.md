@@ -3,15 +3,13 @@
 Raw data is not included in the repository.
 
 ## Download
+Först måste man installera kagglehub: pip install kagglehub (om importsen inte fungerar)
 
-1. Skaffa en Kaggle API-token på https://www.kaggle.com/settings → API → Create New Token
-2. Sätt miljövariabeln:
-   ```bash
-   export KAGGLE_API_TOKEN=<din-token>
-   ```
-3. Kör nedladdningsskriptet:
-   ```bash
-   python scripts/download_data.py
-   ```
+Sedan kör man:
 
-Filerna placeras automatiskt i denna mapp.
+Pip install r-requirements.txt
+
+Och för att ladda ner zipfilen kör man ingest.py
+python ingest.py
+
+
