@@ -4,6 +4,14 @@ Raw data is not included in the repository.
 
 ## Download
 
-<!-- Add download link here -->
+1. Skaffa en Kaggle API-token på https://www.kaggle.com/settings → API → Create New Token
+2. Sätt miljövariabeln:
+   ```bash
+   export KAGGLE_API_TOKEN=<din-token>
+   ```
+3. Kör nedladdningsskriptet:
+   ```bash
+   python scripts/download_data.py
+   ```
 
-Place downloaded files in this directory before running the pipeline.
+Filerna placeras automatiskt i denna mapp.
