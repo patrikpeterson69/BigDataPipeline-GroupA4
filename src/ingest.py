@@ -10,7 +10,7 @@ DATASET = "jeffsinsel/nyc-fhvhv-data"
 def main():
     print("Laddar ner datasetet från Kaggle (detta kan ta lite tid)...")
     # Kagglehub cachar datan, så den laddas bara ner första gången
-    dataset_path = kagglehub.dataset_download(DATASET)
+    dataset_path = kagglehub.dataset_download(DATASET, path="data/")
     print(f"Dataset nedladdat/hittat på: {dataset_path}\n")
 
     filer = os.listdir(dataset_path)
