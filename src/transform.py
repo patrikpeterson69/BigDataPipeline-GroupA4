@@ -1,5 +1,6 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col, avg, count, round, rank
+from pyspark.sql.window import Window
 from utils import get_logger
 import requests
 from pathlib import Path
@@ -63,8 +64,24 @@ def process_data(spark, input_path="data/*.parquet", output_path="data/processed
     )
     logger.info("Join klar!")
     
-    # TODO: Lägg till Aggregation (t.ex. snittpris per zon)
-    # TODO: Lägg till Window function (för VG-krav)
+    # Aggregation: snittpris och antal resor per pickup-borough
+    logger.info("Aggregerar data per borough...")
+    df_agg = df_joined.groupBy("pickup_borough").agg(
+        count("*").alias("antal_resor"),
+        round(avg("base_passenger_fare"), 2).alias("snitt_pris")
+    ).orderBy(col("antal_resor").desc())
+    logger.info("Aggregation klar!")
+    df_agg.show()
+    
+    # Window function: ranka zoner per borough baserat på antal resor
+    logger.info("Kör window function - rankar zoner per borough...")
+    zone_counts = df_joined.groupBy("pickup_borough", "pickup_zone").agg(
+        count("*").alias("antal_resor")
+    )
+    window_spec = Window.partitionBy("pickup_borough").orderBy(col("antal_resor").desc())
+    df_ranked = zone_counts.withColumn("rank", rank().over(window_spec))
+    logger.info("Window function klar!")
+    df_ranked.filter(col("rank") <= 3).orderBy("pickup_borough", "rank").show(truncate=False)
 
 
     logger.info(f"Sparar bearbetad data till {output_path}")
