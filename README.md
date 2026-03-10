@@ -27,13 +27,22 @@ source .venv/Scripts/activate
 pip install -r requirements.txt
 ```
 
-### 5. Ladda ner data (~12GB)
+### 5. Ladda ner Hadoop winutils (endast Windows)
+
+PySpark kräver `winutils.exe` och `hadoop.dll` för att fungera på Windows. Kör i PowerShell:
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/cdarlint/winutils/raw/master/hadoop-3.3.5/bin/winutils.exe" -OutFile "bin/winutils.exe"
+Invoke-WebRequest -Uri "https://github.com/cdarlint/winutils/raw/master/hadoop-3.3.5/bin/hadoop.dll" -OutFile "bin/hadoop.dll"
+```
+
+### 6. Ladda ner data (~12GB)
 ```bash
 python src/ingest.py
 ```
 Filerna laddas ner automatiskt till `data/`. Redan nedladdade filer hoppas över vid omkörning.
 
-### 6. Kör transformationen
+### 7. Kör transformationen
 ```bash
 python src/transform.py
 ```

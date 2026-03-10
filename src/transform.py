@@ -1,3 +1,5 @@
+import os
+import sys
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, avg, count, round, rank
 from pyspark.sql.window import Window
@@ -7,18 +9,38 @@ from pathlib import Path
 
 logger = get_logger("Transformation")
 
+BASE_DIR = Path(__file__).parent.parent
+DATA_DIR = BASE_DIR / "data"
+
 def create_spark_session():
     logger.info("Startar Apache Spark-session...")
+    # Fixa Windows-kompatibilitet
+    if sys.platform == "win32":
+        os.environ.setdefault("HADOOP_HOME", str(BASE_DIR))
+        os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     return SparkSession.builder \
         .appName("NYCTaxi_Pipeline") \
-        .config("spark.driver.memory", "4g") \
+        .config("spark.driver.memory", "8g") \
+        .config("spark.driver.maxResultSize", "4g") \
+        .config("spark.hadoop.io.native.lib.available", "false") \
+        .config("spark.sql.parquet.enableVectorizedReader", "false") \
+        .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem") \
+        .config("spark.hadoop.fs.local.io.read.vectored.enabled", "false") \
+        .config("spark.driver.extraJavaOptions", "-XX:MaxDirectMemorySize=8g -Djdk.nio.maxCachedBufferSize=0") \
+        .config("spark.sql.shuffle.partitions", "8") \
+        .config("spark.default.parallelism", "4") \
         .getOrCreate()
 
-def process_data(spark, input_path="data/*.parquet", output_path="data/processed/"):
-    logger.info(f"Läser in all Parquet-data från {input_path}")
-    
-    # Läs in alla filer som matchar mönstret samtidigt
-    df = spark.read.parquet(input_path)
+def process_data(spark, input_path=None, output_path=None):
+    if input_path is None:
+        input_path = str(DATA_DIR / "*.parquet")
+    if output_path is None:
+        output_path = str(DATA_DIR / "processed")
+    # Lista filer med Python istället för glob (Windows-kompatibelt)
+    parquet_files = [str(f) for f in DATA_DIR.glob("fhvhv_tripdata_*.parquet")]
+    logger.info(f"Hittade {len(parquet_files)} parquet-filer i {DATA_DIR}")
+
+    df = spark.read.parquet(*parquet_files)
     
 
     initial_count = df.count()
@@ -26,13 +48,12 @@ def process_data(spark, input_path="data/*.parquet", output_path="data/processed
     
     # Ta bort rader där viktiga kolumner är tomma (Null)
     logger.info("Rensar bort ogiltig data (Null-värden)...")
-    df_clean = df.dropna(subset=["tpep_pickup_datetime", "tpep_dropoff_datetime", "total_amount"])
+    df_clean = df.dropna(subset=["pickup_datetime", "dropoff_datetime", "base_passenger_fare"])
 
     # Operation A: Filtrering (Ta bort orimliga resor)
     logger.info("Filtrerar bort resor med negativt pris eller noll passagerare...")
     df_clean = df_clean.filter(
-        (col("total_amount") > 0) & 
-        (col("passenger_count") > 0)
+        col("base_passenger_fare") > 0
     )
     
     # Beräkna hur mycket vi rensade bort
@@ -84,9 +105,15 @@ def process_data(spark, input_path="data/*.parquet", output_path="data/processed
     df_ranked.filter(col("rank") <= 3).orderBy("pickup_borough", "rank").show(truncate=False)
 
 
-    logger.info(f"Sparar bearbetad data till {output_path}")
-
-    df_clean.write.mode("overwrite").parquet(output_path)
+    # Spara aggregationsresultaten via pandas (undviker Hadoop write-committer på Windows)
+    processed_dir = DATA_DIR / "processed"
+    processed_dir.mkdir(exist_ok=True)
+    agg_path = str(processed_dir / "agg_per_borough.parquet")
+    ranked_path = str(processed_dir / "ranked_zones.parquet")
+    logger.info(f"Sparar aggregation till {agg_path}")
+    df_agg.toPandas().to_parquet(agg_path, index=False)
+    logger.info(f"Sparar rankade zoner till {ranked_path}")
+    df_ranked.filter(col("rank") <= 3).toPandas().to_parquet(ranked_path, index=False)
     logger.info("Pipeline färdig!")
 
 if __name__ == "__main__":
