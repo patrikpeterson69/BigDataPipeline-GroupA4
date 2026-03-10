@@ -1,31 +1,49 @@
 # BigDataPipeline - Group A4
 
-## Setup
+## Kom igång (steg för steg)
 
-### Prerequisites
-- Python 3.10+
-- pip
+### 1. Klona repot
+```bash
+git clone <repo-url>
+cd BigDataPipeline-GroupA4
+```
 
-### Installation
+### 2. Skapa virtual environment
+```bash
+python -m venv .venv
+```
 
+### 3. Aktivera virtual environment
+```bash
+# Windows Git Bash / Mac / Linux:
+source .venv/Scripts/activate
+
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
+```
+
+### 4. Installera dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### Data
-
-Datasetet är **NYC FHVHV Trip Data** från NYC Taxi & Limousine Commission och laddas ner automatiskt.
-
-### Kör pipeline
-
-1. Ladda ner data och läs in:
+### 5. Ladda ner data (~12GB)
 ```bash
 python src/ingest.py
 ```
+Filerna laddas ner automatiskt till `data/`. Redan nedladdade filer hoppas över vid omkörning.
 
-Data laddas ner till `data/` automatiskt. Redan nedladdade filer hoppas över vid omkörning.
-
-2. Transformera data:
+### 6. Kör transformationen
 ```bash
 python src/transform.py
+```
+
+## Projektstruktur
+```
+src/
+  ingest.py      # Laddar ner parquet-filer från NYC TLC
+  transform.py   # Join, aggregation och window functions med PySpark
+data/
+  *.parquet      # Rådatan (ignoreras av git)
+  taxi_zone_lookup.csv  # Zonreferens (laddas ner automatiskt)
 ```
