@@ -1,6 +1,8 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from utils import get_logger
+import requests
+from pathlib import Path
 
 logger = get_logger("Transformation")
 
@@ -36,7 +38,31 @@ def process_data(spark, input_path="data/*.parquet", output_path="data/processed
     final_count = df_clean.count()
     logger.info(f"Rader kvar efter tvätt: {final_count} (Tog bort {initial_count - final_count} rader)")
     
-    # TODO: Lägg till Join (t.ex. med taxizoner)
+    # Ladda ner zonfilen om den saknas
+    zone_file = Path("data/taxi_zone_lookup.csv")
+    ### if not zone_file.exists():
+       # logger.info("Laddar ner taxi_zone_lookup.csv...")
+       # r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
+        #zone_file.write_bytes(r.content)
+
+    # Joina med taxizoner
+    logger.info("Joindar med taxizoner...")
+    zones = spark.read.csv(str(zone_file), header=True, inferSchema=True)
+
+    df_joined = df_clean.join(
+        zones.select(col("LocationID").alias("PULocationID"),
+                     col("Zone").alias("pickup_zone"),
+                     col("Borough").alias("pickup_borough")),
+        on="PULocationID", how="left"
+    )
+    df_joined = df_joined.join(
+        zones.select(col("LocationID").alias("DOLocationID"),
+                     col("Zone").alias("dropoff_zone"),
+                     col("Borough").alias("dropoff_borough")),
+        on="DOLocationID", how="left"
+    )
+    logger.info("Join klar!")
+    
     # TODO: Lägg till Aggregation (t.ex. snittpris per zon)
     # TODO: Lägg till Window function (för VG-krav)
 
