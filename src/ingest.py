@@ -1,7 +1,6 @@
 """Data ingestion module - laddar ner NYC FHVHV data från NYC TLC."""
 
 import requests
-import pandas as pd
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"

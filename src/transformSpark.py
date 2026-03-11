@@ -20,14 +20,14 @@ def create_spark_session():
         os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     return SparkSession.builder \
         .appName("NYCTaxi_Pipeline") \
-        .config("spark.driver.memory", "8g") \
-        .config("spark.driver.maxResultSize", "4g") \
+        .config("spark.driver.memory", "4g") \
+        .config("spark.driver.maxResultSize", "2g") \
         .config("spark.hadoop.io.native.lib.available", "false") \
         .config("spark.sql.parquet.enableVectorizedReader", "false") \
         .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem") \
         .config("spark.hadoop.fs.local.io.read.vectored.enabled", "false") \
-        .config("spark.driver.extraJavaOptions", "-XX:MaxDirectMemorySize=8g -Djdk.nio.maxCachedBufferSize=0") \
-        .config("spark.sql.shuffle.partitions", "8") \
+        .config("spark.driver.extraJavaOptions", "-XX:MaxDirectMemorySize=2g -Djdk.nio.maxCachedBufferSize=0") \
+        .config("spark.sql.shuffle.partitions", "200") \
         .config("spark.default.parallelism", "4") \
         .getOrCreate()
 
@@ -42,10 +42,6 @@ def process_data(spark, input_path=None, output_path=None):
 
     df = spark.read.parquet(*parquet_files)
     
-
-    initial_count = df.count()
-    logger.info(f"Totalt antal rader inlästa: {initial_count}")
-    
     # Ta bort rader där viktiga kolumner är tomma (Null)
     logger.info("Rensar bort ogiltig data (Null-värden)...")
     df_clean = df.dropna(subset=["pickup_datetime", "dropoff_datetime", "base_passenger_fare"])
@@ -56,11 +52,6 @@ def process_data(spark, input_path=None, output_path=None):
         col("base_passenger_fare") > 0
     )
 
-    df_clean.cache()
-    
-    # Beräkna hur mycket vi rensade bort
-    final_count = df_clean.count()
-    logger.info(f"Rader kvar efter tvätt: {final_count} (Tog bort {initial_count - final_count} rader)")
     
     # Ladda ner zonfilen om den saknas
     zone_file = Path("data/taxi_zone_lookup.csv")
@@ -70,7 +61,7 @@ def process_data(spark, input_path=None, output_path=None):
         #zone_file.write_bytes(r.content)
 
     # Joina med taxizoner
-    logger.info("Joindar med taxizoner...")
+    logger.info("Joinar med taxizoner...")
     zones = spark.read.csv(str(zone_file), header=True, inferSchema=True)
 
     df_joined = df_clean.join(
@@ -113,9 +104,10 @@ def process_data(spark, input_path=None, output_path=None):
     agg_path = str(processed_dir / "agg_per_borough.parquet")
     ranked_path = str(processed_dir / "ranked_zones.parquet")
     logger.info(f"Sparar aggregation till {agg_path}")
-    df_agg.write.mode("overwrite").parquet(agg_path)
+    # Use coalesce(1) to write to a single file, which is more robust on Windows local filesystem
+    df_agg.coalesce(1).write.mode("overwrite").parquet(agg_path)
     logger.info(f"Sparar rankade zoner till {ranked_path}")
-    df_ranked.filter(col("rank") <= 3).write.mode("overwrite").parquet(ranked_path)
+    df_ranked.filter(col("rank") <= 3).coalesce(1).write.mode("overwrite").parquet(ranked_path)
     logger.info("Pipeline färdig!")
 
     df_clean.unpersist()
