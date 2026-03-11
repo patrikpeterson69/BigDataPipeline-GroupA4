@@ -2,6 +2,7 @@
 *.zip
 data/*.csv
 data/*.parquet
+data/processed/
 
 # Python
 __pycache__/
@@ -10,3 +11,6 @@ __pycache__/
 
 # Environment
 .env
+
+# Hadoop/Winutils (Windows-only binaries)
+bin/

@@ -1,34 +1,44 @@
-"""Download NYC FHVHV dataset from Kaggle using kagglehub."""
+"""Data ingestion module - laddar ner NYC FHVHV data från NYC TLC."""
 
-import os
-import kagglehub
+import requests
 import pandas as pd
+from pathlib import Path
 
-DATASET = "jeffsinsel/nyc-fhvhv-data"
+DATA_DIR = Path(__file__).parent.parent / "data"
+BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data"
+MONTHS = [
+    "2020-01", "2020-02", "2020-03", "2020-04", "2020-05", "2020-06",
+    "2020-07", "2020-08", "2020-09", "2020-10", "2020-11", "2020-12",
+    "2021-01", "2021-02", "2021-03", "2021-04", "2021-05", "2021-06",
+    "2021-07", "2021-08", "2021-09", "2021-10", "2021-11", "2021-12",
+    "2022-01", "2022-02", "2022-03", "2022-04", "2022-05", "2022-06",
+    "2022-07", "2022-08", "2022-09", "2022-10", "2022-11", "2022-12",
+]
 
 
-def main():
-    print("Laddar ner datasetet från Kaggle (detta kan ta lite tid)...")
-    # Kagglehub cachar datan, så den laddas bara ner första gången
-    dataset_path = kagglehub.dataset_download(DATASET, path="data/")
-    print(f"Dataset nedladdat/hittat på: {dataset_path}\n")
+def ingest():
+    DATA_DIR.mkdir(exist_ok=True)
 
-    filer = os.listdir(dataset_path)
-    print("Hittade följande filer (visar upp till 5 stycken):")
-    for fil in filer[:5]:
-        print(f" - {fil}")
+    for month in MONTHS:
+        filename = f"fhvhv_tripdata_{month}.parquet"
+        dest = DATA_DIR / filename
 
-    parquet_filer = [f for f in filer if f.endswith(".parquet")]
-    if parquet_filer:
-        vald_fil = parquet_filer[0]
-        komplett_sökväg = os.path.join(dataset_path, vald_fil)
-        print(f"\nLäser in data från {vald_fil}...")
-        df = pd.read_parquet(komplett_sökväg)
-        print("\nFörsta 5 raderna:")
-        print(df.head())
-    else:
-        print("Hittade inga Parquet-filer i datasetet.")
+        if not dest.exists():
+            url = f"{BASE_URL}/{filename}"
+            print(f"Laddar ner {filename}...")
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            with open(dest, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print(f"Sparad till {dest}")
+        else:
+            print(f"{filename} finns redan, hoppar över nedladdning.")
+
+    files = sorted(DATA_DIR.glob("fhvhv_tripdata_*.parquet"))
+    print(f"\nKlart! {len(files)} filer i {DATA_DIR}")
+    return [str(f) for f in files]
 
 
 if __name__ == "__main__":
-    main()
+    ingest()
