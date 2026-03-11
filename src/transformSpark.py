@@ -62,10 +62,10 @@ def process_data(spark, input_path=None, output_path=None):
     
     # Ladda ner zonfilen om den saknas
     zone_file = Path("data/taxi_zone_lookup.csv")
-    ### if not zone_file.exists():
-       # logger.info("Laddar ner taxi_zone_lookup.csv...")
-       # r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
-        #zone_file.write_bytes(r.content)
+    if not zone_file.exists():
+        logger.info("Laddar ner taxi_zone_lookup.csv...")
+        r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
+        zone_file.write_bytes(r.content)
 
     # Joina med taxizoner
     logger.info("Joindar med taxizoner...")
