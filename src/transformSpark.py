@@ -1,7 +1,7 @@
 import os
 import sys
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, avg, count, round, rank
+from pyspark.sql.functions import col, avg, count, round, rank, broadcast
 from pyspark.sql.window import Window
 from utils import get_logger
 import requests
@@ -55,6 +55,8 @@ def process_data(spark, input_path=None, output_path=None):
     df_clean = df_clean.filter(
         col("base_passenger_fare") > 0
     )
+
+    df_clean.cache()
     
     # Beräkna hur mycket vi rensade bort
     final_count = df_clean.count()
@@ -72,13 +74,13 @@ def process_data(spark, input_path=None, output_path=None):
     zones = spark.read.csv(str(zone_file), header=True, inferSchema=True)
 
     df_joined = df_clean.join(
-        zones.select(col("LocationID").alias("PULocationID"),
+        broadcast(zones).select(col("LocationID").alias("PULocationID"),
                      col("Zone").alias("pickup_zone"),
                      col("Borough").alias("pickup_borough")),
         on="PULocationID", how="left"
     )
     df_joined = df_joined.join(
-        zones.select(col("LocationID").alias("DOLocationID"),
+        broadcast(zones).select(col("LocationID").alias("DOLocationID"),
                      col("Zone").alias("dropoff_zone"),
                      col("Borough").alias("dropoff_borough")),
         on="DOLocationID", how="left"
@@ -111,11 +113,12 @@ def process_data(spark, input_path=None, output_path=None):
     agg_path = str(processed_dir / "agg_per_borough.parquet")
     ranked_path = str(processed_dir / "ranked_zones.parquet")
     logger.info(f"Sparar aggregation till {agg_path}")
-    df_agg.toPandas().to_parquet(agg_path, index=False)
+    df_agg.write.mode("overwrite").parquet(agg_path)
     logger.info(f"Sparar rankade zoner till {ranked_path}")
-    df_ranked.filter(col("rank") <= 3).toPandas().to_parquet(ranked_path, index=False)
+    df_ranked.filter(col("rank") <= 3).write.mode("overwrite").parquet(ranked_path)
     logger.info("Pipeline färdig!")
 
+    df_clean.unpersist()
 if __name__ == "__main__":
     spark = create_spark_session()
     process_data(spark)
