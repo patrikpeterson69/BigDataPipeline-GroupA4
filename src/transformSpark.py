@@ -44,7 +44,7 @@ def process_data(spark, input_path=None, output_path=None):
     
     # Ta bort rader där viktiga kolumner är tomma (Null)
     logger.info("Rensar bort ogiltig data (Null-värden)...")
-    df_clean = df.dropna(subset=["pickup_datetime", "dropoff_datetime", "base_passenger_fare"])
+    df_clean = df.dropna()
 
     # Operation A: Filtrering (Ta bort orimliga resor)
     logger.info("Filtrerar bort resor med negativt pris eller noll passagerare...")
