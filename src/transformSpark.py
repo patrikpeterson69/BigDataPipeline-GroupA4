@@ -27,8 +27,8 @@ def create_spark_session():
         .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem") \
         .config("spark.hadoop.fs.local.io.read.vectored.enabled", "false") \
         .config("spark.driver.extraJavaOptions", "-XX:MaxDirectMemorySize=8g -Djdk.nio.maxCachedBufferSize=0") \
-        .config("spark.sql.shuffle.partitions", "8") \
-        .config("spark.default.parallelism", "4") \
+        .config("spark.sql.shuffle.partitions", "200") \
+        .config("spark.default.parallelism", "6") \
         .getOrCreate()
 
 def process_data(spark, input_path=None, output_path=None):
@@ -62,10 +62,10 @@ def process_data(spark, input_path=None, output_path=None):
     
     # Ladda ner zonfilen om den saknas
     zone_file = Path("data/taxi_zone_lookup.csv")
-    ### if not zone_file.exists():
-       # logger.info("Laddar ner taxi_zone_lookup.csv...")
-       # r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
-        #zone_file.write_bytes(r.content)
+    if not zone_file.exists():
+        logger.info("Laddar ner taxi_zone_lookup.csv...")
+        r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
+        zone_file.write_bytes(r.content)
 
     # Joina med taxizoner
     logger.info("Joindar med taxizoner...")

@@ -9,8 +9,8 @@ cd BigDataPipeline-GroupA4
 ```
 
 ### 2. Skapa virtual environment
-```bash
-python -m venv .venv
+```powershell
+py -m venv .venv
 ```
 
 ### 3. Aktivera virtual environment
@@ -28,6 +28,8 @@ pip install -r requirements.txt
 ```
 
 ### 5. Ladda ner Hadoop winutils (endast Windows)
+
+mkdir bin kommando
 
 PySpark kräver `winutils.exe` och `hadoop.dll` för att fungera på Windows. Kör i PowerShell:
 
