@@ -1,7 +1,7 @@
 import os
 import sys
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, avg, count, round, rank
+from pyspark.sql.functions import col, avg, count, round, rank, broadcast
 from pyspark.sql.window import Window
 from utils import get_logger
 import requests
@@ -21,13 +21,15 @@ def create_spark_session():
     return SparkSession.builder \
         .appName("NYCTaxi_Pipeline") \
         .config("spark.driver.memory", "8g") \
-        .config("spark.driver.maxResultSize", "4g") \
+        .config("spark.driver.maxResultSize", "2g") \
         .config("spark.hadoop.io.native.lib.available", "false") \
         .config("spark.sql.parquet.enableVectorizedReader", "false") \
         .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem") \
         .config("spark.hadoop.fs.local.io.read.vectored.enabled", "false") \
-        .config("spark.driver.extraJavaOptions", "-XX:MaxDirectMemorySize=8g -Djdk.nio.maxCachedBufferSize=0") \
-        .config("spark.sql.shuffle.partitions", "8") \
+        .config("spark.hadoop.fs.permissions.umask-mode", "000") \
+        .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2") \
+        .config("spark.driver.extraJavaOptions", "-XX:MaxDirectMemorySize=2g -Djdk.nio.maxCachedBufferSize=0") \
+        .config("spark.sql.shuffle.partitions", "200") \
         .config("spark.default.parallelism", "4") \
         .getOrCreate()
 
@@ -42,43 +44,36 @@ def process_data(spark, input_path=None, output_path=None):
 
     df = spark.read.parquet(*parquet_files)
     
-
-    initial_count = df.count()
-    logger.info(f"Totalt antal rader inlästa: {initial_count}")
-    
     # Ta bort rader där viktiga kolumner är tomma (Null)
     logger.info("Rensar bort ogiltig data (Null-värden)...")
-    df_clean = df.dropna(subset=["pickup_datetime", "dropoff_datetime", "base_passenger_fare"])
+    df_clean = df.dropna(subset=["base_passenger_fare", "PULocationID", "DOLocationID"])
 
     # Operation A: Filtrering (Ta bort orimliga resor)
     logger.info("Filtrerar bort resor med negativt pris eller noll passagerare...")
     df_clean = df_clean.filter(
         col("base_passenger_fare") > 0
     )
-    
-    # Beräkna hur mycket vi rensade bort
-    final_count = df_clean.count()
-    logger.info(f"Rader kvar efter tvätt: {final_count} (Tog bort {initial_count - final_count} rader)")
+
     
     # Ladda ner zonfilen om den saknas
-    zone_file = Path("data/taxi_zone_lookup.csv")
-    ### if not zone_file.exists():
-       # logger.info("Laddar ner taxi_zone_lookup.csv...")
-       # r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
-        #zone_file.write_bytes(r.content)
+    zone_file = BASE_DIR / "data" / "taxi_zone_lookup.csv"
+    if not zone_file.exists():
+        logger.info("Laddar ner taxi_zone_lookup.csv...")
+        r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
+        zone_file.write_bytes(r.content)
 
     # Joina med taxizoner
-    logger.info("Joindar med taxizoner...")
+    logger.info("Joinar med taxizoner...")
     zones = spark.read.csv(str(zone_file), header=True, inferSchema=True)
 
     df_joined = df_clean.join(
-        zones.select(col("LocationID").alias("PULocationID"),
+        broadcast(zones).select(col("LocationID").alias("PULocationID"),
                      col("Zone").alias("pickup_zone"),
                      col("Borough").alias("pickup_borough")),
         on="PULocationID", how="left"
     )
     df_joined = df_joined.join(
-        zones.select(col("LocationID").alias("DOLocationID"),
+        broadcast(zones).select(col("LocationID").alias("DOLocationID"),
                      col("Zone").alias("dropoff_zone"),
                      col("Borough").alias("dropoff_borough")),
         on="DOLocationID", how="left"
@@ -116,6 +111,7 @@ def process_data(spark, input_path=None, output_path=None):
     df_ranked.filter(col("rank") <= 3).toPandas().to_parquet(ranked_path, index=False)
     logger.info("Pipeline färdig!")
 
+    df_clean.unpersist()
 if __name__ == "__main__":
     spark = create_spark_session()
     process_data(spark)
