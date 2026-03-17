@@ -137,7 +137,9 @@ def process_data(spark, input_path=None, output_path=None):
     df_clean.unpersist()
     return timings
 if __name__ == "__main__":
+    import webbrowser
     spark = create_spark_session()
+    webbrowser.open("http://localhost:4040")
     process_data(spark)
     # Stäng alltid Spark snyggt
     spark.stop()
