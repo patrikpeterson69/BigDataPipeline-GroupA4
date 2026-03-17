@@ -80,7 +80,7 @@ def process_data(input_path=None, output_path=None):
         .reset_index()
         .rename(columns={0: "antal_resor"})
     )
-    zone_counts = zone_counts_by_loc.merge(zones_pu, on="PULocationID", how="left").dropna(subset=["pickup_borough"])
+    zone_counts = zone_counts_by_loc.merge(zones_pu, on="PULocationID", how="left").dropna(subset=["pickup_borough", "pickup_zone"])
     zone_counts["rank"] = (
         zone_counts.groupby("pickup_borough")["antal_resor"]
         .rank(method="min", ascending=False)
@@ -109,7 +109,11 @@ def process_data(input_path=None, output_path=None):
 
 
 if __name__ == "__main__":
-    import dask
-    dask.config.set(scheduler="threads", num_workers=8)
+    from dask.distributed import Client
+
+    client = Client(n_workers=8, threads_per_worker=4, processes=False, memory_limit=0, dashboard_address="localhost:8787")
+    logger.info(f"Dask dashboard: http://localhost:8787/status")
 
     process_data()
+
+    client.close()
