@@ -1,3 +1,4 @@
+import time
 import dask.dataframe as dd
 import pandas as pd
 import requests
@@ -17,15 +18,21 @@ def process_data(input_path=None, output_path=None):
     parquet_files = [str(f) for f in DATA_DIR.glob("fhvhv_tripdata_*.parquet")]
     logger.info(f"Hittade {len(parquet_files)} parquet-filer i {DATA_DIR}")
 
+    timings = {}
+    pipeline_start = time.time()
+
+    t0 = time.time()
     df = dd.read_parquet(parquet_files, columns=["PULocationID", "DOLocationID", "base_passenger_fare"])
+    timings["Inläsning"] = time.time() - t0
+    logger.info(f"[TIMING] Inläsning: {timings['Inläsning']:.2f}s")
 
     # Ta bort rader där viktiga kolumner är tomma (Null)
     logger.info("Rensar bort ogiltig data (Null-värden)...")
+    t0 = time.time()
     df_clean = df.dropna(subset=["base_passenger_fare", "PULocationID", "DOLocationID"])
-
-    # Operation A: Filtrering (Ta bort orimliga resor)
-    logger.info("Filtrerar bort resor med negativt pris eller noll passagerare...")
     df_clean = df_clean[df_clean["base_passenger_fare"] > 0]
+    timings["Filtrering + dropna"] = time.time() - t0
+    logger.info(f"[TIMING] Filtrering + dropna: {timings['Filtrering + dropna']:.2f}s")
 
     # Ladda ner zonfilen om den saknas
     zone_file = BASE_DIR / "data" / "taxi_zone_lookup.csv"
@@ -38,6 +45,7 @@ def process_data(input_path=None, output_path=None):
     logger.info("Joinar med taxizoner...")
     zones = pd.read_csv(str(zone_file))
 
+    t0 = time.time()
     df_joined = df_clean.merge(
         zones[["LocationID", "Zone", "Borough"]].rename(columns={
             "LocationID": "PULocationID",
@@ -54,10 +62,12 @@ def process_data(input_path=None, output_path=None):
         }),
         on="DOLocationID", how="left"
     )
-    logger.info("Join klar!")
+    timings["Join med taxizoner"] = time.time() - t0
+    logger.info(f"[TIMING] Join med taxizoner: {timings['Join med taxizoner']:.2f}s")
 
     # Aggregation: snittpris och antal resor per pickup-borough
     logger.info("Aggregerar data per borough...")
+    t0 = time.time()
     df_agg = (
         df_joined.groupby("pickup_borough")["base_passenger_fare"]
         .agg(["count", "mean"])
@@ -67,11 +77,13 @@ def process_data(input_path=None, output_path=None):
         .sort_values("antal_resor", ascending=False)
     )
     df_agg["snitt_pris"] = df_agg["snitt_pris"].round(2)
-    logger.info("Aggregation klar!")
+    timings["Aggregation per borough"] = time.time() - t0
+    logger.info(f"[TIMING] Aggregation per borough: {timings['Aggregation per borough']:.2f}s")
     print(df_agg.to_string(index=False))
 
     # Window function: ranka zoner per borough baserat på antal resor
     logger.info("Kör window function - rankar zoner per borough...")
+    t0 = time.time()
     zone_counts = (
         df_joined.groupby(["pickup_borough", "pickup_zone"])
         .size()
@@ -85,7 +97,8 @@ def process_data(input_path=None, output_path=None):
         .astype(int)
     )
     df_ranked = zone_counts[zone_counts["rank"] <= 3].sort_values(["pickup_borough", "rank"])
-    logger.info("Window function klar!")
+    timings["Window function"] = time.time() - t0
+    logger.info(f"[TIMING] Window function: {timings['Window function']:.2f}s")
     print(df_ranked.to_string(index=False))
 
     # Spara resultat
@@ -93,11 +106,16 @@ def process_data(input_path=None, output_path=None):
     processed_dir.mkdir(exist_ok=True)
     agg_path = str(processed_dir / "agg_per_borough_dask.parquet")
     ranked_path = str(processed_dir / "ranked_zones_dask.parquet")
-    logger.info(f"Sparar aggregation till {agg_path}")
+    t0 = time.time()
     df_agg.to_parquet(agg_path, index=False)
-    logger.info(f"Sparar rankade zoner till {ranked_path}")
     df_ranked.to_parquet(ranked_path, index=False)
+    timings["Spara till parquet"] = time.time() - t0
+    logger.info(f"[TIMING] Spara till parquet: {timings['Spara till parquet']:.2f}s")
+
+    timings["Total pipeline"] = time.time() - pipeline_start
+    logger.info(f"[TIMING] Total pipeline: {timings['Total pipeline']:.2f}s")
     logger.info("Pipeline färdig!")
+    return timings
 
 
 if __name__ == "__main__":
