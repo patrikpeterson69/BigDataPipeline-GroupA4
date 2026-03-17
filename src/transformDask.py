@@ -41,56 +41,46 @@ def process_data(input_path=None, output_path=None):
         r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
         zone_file.write_bytes(r.content)
 
-    # Joina med taxizoner (zones är liten → pandas, broadcast via merge)
-    logger.info("Joinar med taxizoner...")
     zones = pd.read_csv(str(zone_file))
+    zones_pu = zones[["LocationID", "Zone", "Borough"]].rename(columns={
+        "LocationID": "PULocationID",
+        "Zone": "pickup_zone",
+        "Borough": "pickup_borough"
+    })
 
-    t0 = time.time()
-    df_joined = df_clean.merge(
-        zones[["LocationID", "Zone", "Borough"]].rename(columns={
-            "LocationID": "PULocationID",
-            "Zone": "pickup_zone",
-            "Borough": "pickup_borough"
-        }),
-        on="PULocationID", how="left"
-    )
-    df_joined = df_joined.merge(
-        zones[["LocationID", "Zone", "Borough"]].rename(columns={
-            "LocationID": "DOLocationID",
-            "Zone": "dropoff_zone",
-            "Borough": "dropoff_borough"
-        }),
-        on="DOLocationID", how="left"
-    )
-    timings["Join med taxizoner"] = time.time() - t0
-    logger.info(f"[TIMING] Join med taxizoner: {timings['Join med taxizoner']:.2f}s")
-
-    # Aggregation: snittpris och antal resor per pickup-borough
+    # Aggregation: aggregera per PULocationID först (numeriska ID:n, litet resultat)
+    # Joina sedan zones på det lilla aggregerade resultatet (~265 rader) istället för på hela datasetet
     logger.info("Aggregerar data per borough...")
     t0 = time.time()
-    df_agg = (
-        df_joined.groupby("pickup_borough")["base_passenger_fare"]
-        .agg(["count", "mean"])
-        .rename(columns={"count": "antal_resor", "mean": "snitt_pris"})
-        .reset_index()
+    agg_by_loc = (
+        df_clean.groupby("PULocationID")["base_passenger_fare"]
+        .agg(["count", "sum"])
         .compute()
-        .sort_values("antal_resor", ascending=False)
+        .reset_index()
     )
-    df_agg["snitt_pris"] = df_agg["snitt_pris"].round(2)
+    agg_by_loc = agg_by_loc.merge(zones_pu[["PULocationID", "pickup_borough"]], on="PULocationID", how="left")
+    df_agg = (
+        agg_by_loc.groupby("pickup_borough")
+        .agg(antal_resor=("count", "sum"), total_fare=("sum", "sum"))
+        .reset_index()
+    )
+    df_agg["snitt_pris"] = (df_agg["total_fare"] / df_agg["antal_resor"]).round(2)
+    df_agg = df_agg.drop(columns="total_fare").sort_values("antal_resor", ascending=False)
     timings["Aggregation per borough"] = time.time() - t0
     logger.info(f"[TIMING] Aggregation per borough: {timings['Aggregation per borough']:.2f}s")
     print(df_agg.to_string(index=False))
 
-    # Window function: ranka zoner per borough baserat på antal resor
+    # Window function: aggregera per (PULocationID) → joina zones → ranka per borough
     logger.info("Kör window function - rankar zoner per borough...")
     t0 = time.time()
-    zone_counts = (
-        df_joined.groupby(["pickup_borough", "pickup_zone"])
+    zone_counts_by_loc = (
+        df_clean.groupby("PULocationID")
         .size()
+        .compute()
         .reset_index()
         .rename(columns={0: "antal_resor"})
-        .compute()
     )
+    zone_counts = zone_counts_by_loc.merge(zones_pu, on="PULocationID", how="left").dropna(subset=["pickup_borough"])
     zone_counts["rank"] = (
         zone_counts.groupby("pickup_borough")["antal_resor"]
         .rank(method="min", ascending=False)
@@ -119,13 +109,7 @@ def process_data(input_path=None, output_path=None):
 
 
 if __name__ == "__main__":
-    from dask.distributed import Client
-    import webbrowser
-
-    client = Client(n_workers=2, threads_per_worker=4, processes=False, dashboard_address="localhost:8787")
-    logger.info(f"Dask dashboard: http://localhost:8787/status")
-    webbrowser.open("http://localhost:8787/status")
+    import dask
+    dask.config.set(scheduler="threads", num_workers=8)
 
     process_data()
-
-    client.close()
