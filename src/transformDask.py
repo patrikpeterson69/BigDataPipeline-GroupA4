@@ -119,4 +119,13 @@ def process_data(input_path=None, output_path=None):
 
 
 if __name__ == "__main__":
+    from dask.distributed import Client
+    import webbrowser
+
+    client = Client(n_workers=2, threads_per_worker=4, processes=False, dashboard_address="localhost:8787")
+    logger.info(f"Dask dashboard: http://localhost:8787/status")
+    webbrowser.open("http://localhost:8787/status")
+
     process_data()
+
+    client.close()
