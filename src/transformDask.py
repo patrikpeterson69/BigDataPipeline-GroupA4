@@ -118,9 +118,14 @@ def process_data(input_path=None, output_path=None):
 
 
 if __name__ == "__main__":
+    # Byt ut Client() mot att peka på din Kubernetes-scheduler
+    # Vi kommer att öppna port 8786 strax!
+    client = Client("tcp://localhost:8786")
+    logger.info(f"Connected to Minikube Dask cluster: {client}")
     
-    client = Client(n_workers=8, threads_per_worker=4, processes=False, memory_limit=0, dashboard_address="localhost:8787")
-    logger.info(f"Dask dashboard: http://localhost:8787/status")
+    # Valfritt: Se hur många workers som faktiskt svarar
+    workers = client.scheduler_info()['workers']
+    logger.info(f"Antal tillgängliga workers i klustret: {len(workers)}")
 
     process_data()
 
