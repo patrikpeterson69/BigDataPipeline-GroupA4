@@ -1,6 +1,6 @@
 # Dask Transformation – Körinstruktioner
 
-Pipeline som läser 34 parquet-filer med NYC taxi-data, aggregerar per borough och rankar topp-3 zoner per borough.
+Pipeline som läser de 6 första parquet-filerna (ett halvår) med NYC taxi-data, aggregerar per borough och rankar topp-3 zoner per borough. All databehandling använder kedjad (chained) syntax för smidigare kod.
 
 ## Krav
 
@@ -29,6 +29,8 @@ Dask dashboard: [http://localhost:8787/status](http://localhost:8787/status)
 minikube start --cpus=4 --memory=8192
 ```
 
+> Om du redan har en profil med andra inställningar, kör `minikube delete` först.
+
 ### Steg 2 – Sätt Docker-kontexten till Minikube
 
 ```powershell
@@ -48,6 +50,8 @@ minikube mount C:/Users/<användarnamn>/Documents/GitHub/BigDataPipeline-GroupA4
 ```powershell
 docker build -t dask-transform:latest .
 ```
+
+> Viktigt: Docker-kontexten måste peka mot Minikube (steg 2) annars hittar inte klustret imagen.
 
 ### Steg 5 – Kör jobbet
 
@@ -72,6 +76,23 @@ kubectl port-forward job/dask-transform 8787:8787
 kubectl delete job dask-transform
 minikube stop
 ```
+
+## Felsökning
+
+| Problem | Lösning |
+|---|---|
+| `ErrImageNeverPull` | Docker pekar inte mot Minikube – kör steg 2 igen innan `docker build` |
+| `apiserver: Stopped` | Kör `minikube delete` och starta om med `minikube start` |
+| `ContainerCreating` | Vänta några sekunder – containern startar upp |
+
+## Pipeline-steg
+
+1. **Inläsning** – Läser de 6 första parquet-filerna (ett halvår, 2020-01 till 2020-06)
+2. **Filtrering** – `dropna()` + `query("base_passenger_fare > 0")`
+3. **Zondata** – Laddar ner `taxi_zone_lookup.csv` om den saknas, rensar och kedjar rename
+4. **Aggregation** – Grupperar per borough: antal resor och snittpris
+5. **Window function** – Rankar topp-3 zoner per borough
+6. **Spara** – Resultat till parquet i `data/processed/`
 
 ## Resultat
 
