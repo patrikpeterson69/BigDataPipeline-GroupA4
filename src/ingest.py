@@ -5,6 +5,7 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data"
+ZONE_URL = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv"
 MONTHS = [
     "2020-01", "2020-02", "2020-03", "2020-04", "2020-05", "2020-06",
     "2020-07", "2020-08", "2020-09", "2020-10", "2020-11", "2020-12",
@@ -17,6 +18,17 @@ MONTHS = [
 
 def ingest():
     DATA_DIR.mkdir(exist_ok=True)
+
+    zone_filename = "taxi_zone_lookup.csv"
+    zone_dest = DATA_DIR / zone_filename
+    if not zone_dest.exists():
+        print(f"Laddar ner {zone_filename}...")
+        response = requests.get(ZONE_URL)
+        response.raise_for_status()
+        zone_dest.write_bytes(response.content)
+        print(f"Sparad till {zone_dest}")
+    else:
+        print(f"{zone_filename} finns redan, hoppar över nedladdning.")
 
     for month in MONTHS:
         filename = f"fhvhv_tripdata_{month}.parquet"

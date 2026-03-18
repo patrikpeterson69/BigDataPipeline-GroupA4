@@ -31,6 +31,7 @@ def get_spark_session():
         os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
 
     return SparkSession.builder \
+    builder = SparkSession.builder \
         .appName("NYCTaxi_Pipeline_Cloud") \
         .config("spark.driver.memory", "8g") \
         .config("spark.driver.maxResultSize", "2g") \
@@ -39,6 +40,15 @@ def get_spark_session():
         .config("spark.hadoop.fs.file.impl", "org.apache.hadoop.fs.LocalFileSystem") \
         .config("spark.hadoop.fs.local.io.read.vectored.enabled", "false") \
         .config("spark.hadoop.fs.permissions.umask-mode", "000") \
+
+    if config.ENV == "databricks" and config.ACCESS_KEY:
+        # Lägg till Azure ADLS-connector och konfigurera åtkomst
+        builder = builder \
+            .config("spark.jars.packages", "org.apache.hadoop:hadoop-azure:3.4.0") \
+            .config(f"fs.azure.account.key.{config.STORAGE_ACCOUNT}.blob.core.windows.net",
+                    config.ACCESS_KEY)
+
+    return builder \
         .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2") \
         .config("spark.driver.extraJavaOptions", "-XX:MaxDirectMemorySize=2g -Djdk.nio.maxCachedBufferSize=0") \
         .config("spark.sql.shuffle.partitions", "200") \

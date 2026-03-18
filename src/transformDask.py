@@ -1,0 +1,127 @@
+import time
+import dask.dataframe as dd
+from dask.distributed import Client
+import pandas as pd
+import requests
+from pathlib import Path
+from utils import get_logger
+
+logger = get_logger("TransformationDask")
+
+BASE_DIR = Path(__file__).parent.parent
+DATA_DIR = BASE_DIR / "data"
+
+
+def process_data(input_path=None, output_path=None):
+    if output_path is None:
+        output_path = str(DATA_DIR / "processed")
+
+    parquet_files = [str(f) for f in DATA_DIR.glob("fhvhv_tripdata_*.parquet")]
+    logger.info(f"Hittade {len(parquet_files)} parquet-filer i {DATA_DIR}")
+
+    timings = {}
+    pipeline_start = time.time()
+
+    t0 = time.time()
+    df = dd.read_parquet(parquet_files, columns=["PULocationID", "DOLocationID", "base_passenger_fare"])
+    timings["Inläsning"] = time.time() - t0
+    logger.info(f"[TIMING] Inläsning: {timings['Inläsning']:.2f}s")
+
+    # Ta bort rader där viktiga kolumner är tomma (Null)
+    logger.info("Rensar bort ogiltig data (Null-värden)...")
+    t0 = time.time()
+    # Alternativ med query som är en dask operation
+    df_clean = (
+        df
+        .dropna()
+        .query("base_passenger_fare > 0")
+        .groupby("PULocationID")["base_passenger_fare"]
+        .agg(["count", "sum"])
+        .compute()
+        .reset_index()
+    )
+    timings["Filtrering + dropna"] = time.time() - t0
+    logger.info(f"[TIMING] Filtrering + dropna: {timings['Filtrering + dropna']:.2f}s")
+
+    # Ladda ner zonfilen om den saknas
+    zone_file = BASE_DIR / "data" / "taxi_zone_lookup.csv"
+
+
+    # Läs och rensa zon-data för att matcha Spark-skriptets logik (robusthet)
+    zones = pd.read_csv(str(zone_file))
+    # Ett möjligt alternativ är att göra all rensning i samma steg.
+    zones_clean = (zones
+        .dropna()
+        .drop_duplicates(subset=["LocationID"])
+        .rename(columns={
+            "LocationID": "PULocationID",
+            "Zone": "pickup_zone",
+            "Borough": "pickup_borough"
+        })
+        )
+
+    # Aggregation: aggregera per PULocationID först (numeriska ID:n, litet resultat)
+    # Joina sedan zones på det lilla aggregerade resultatet (~265 rader) istället för på hela datasetet
+    logger.info("Aggregerar data per borough...")
+    t0 = time.time()
+
+    # Alternativ till att lägga df_agg i samma kod steg.
+    df_agg = (
+        df_clean
+        .merge(zones_clean[["PULocationID", "pickup_borough"]], on="PULocationID", how="left")
+        .groupby("pickup_borough")
+        .agg(antal_resor=("count", "sum"), total_fare=("sum", "sum"))
+        .assign(snitt_pris=lambda x: (x["total_fare"] / x["antal_resor"]).round(2))
+        .drop(columns=["total_fare"])
+        .sort_values("antal_resor", ascending=False)
+        .reset_index()
+    )
+
+    timings["Aggregation per borough"] = time.time() - t0
+    logger.info(f"[TIMING] Aggregation per borough: {timings['Aggregation per borough']:.2f}s")
+    print(df_agg.to_string(index=False))
+    # Window function: aggregera per (PULocationID) → joina zones → ranka per borough
+    logger.info("Kör window function - rankar zoner per borough...")
+    t0 = time.time()
+    zone_counts_by_loc = (
+        df_clean[["PULocationID", "count"]]
+        .rename(columns={"count": "antal_resor"})
+    )
+    df_ranked = (
+        zone_counts_by_loc
+        .merge(zones_clean, on="PULocationID", how="left")
+        .dropna(subset=["pickup_borough", "pickup_zone"]) 
+        .assign(rank=lambda x: x.groupby("pickup_borough")["antal_resor"]
+                                .rank(method="min", ascending=False).astype(int))
+        .query("rank <= 3") 
+        .sort_values(["pickup_borough", "rank"])
+    )
+    timings["Window function"] = time.time() - t0
+    logger.info(f"[TIMING] Window function: {timings['Window function']:.2f}s")
+    print(df_ranked.to_string(index=False))
+
+    # Spara resultat
+    processed_dir = DATA_DIR / "processed"
+    processed_dir.mkdir(exist_ok=True)
+    agg_path = str(processed_dir / "agg_per_borough_dask.parquet")
+    ranked_path = str(processed_dir / "ranked_zones_dask.parquet")
+    t0 = time.time()
+    df_agg.to_parquet(agg_path, index=False)
+    df_ranked.to_parquet(ranked_path, index=False)
+    timings["Spara till parquet"] = time.time() - t0
+    logger.info(f"[TIMING] Spara till parquet: {timings['Spara till parquet']:.2f}s")
+
+    timings["Total pipeline"] = time.time() - pipeline_start
+    logger.info(f"[TIMING] Total pipeline: {timings['Total pipeline']:.2f}s")
+    logger.info("Pipeline färdig!")
+    return timings
+
+
+if __name__ == "__main__":
+    
+    client = Client(n_workers=8, threads_per_worker=4, processes=False, memory_limit=0, dashboard_address="localhost:8787")
+    logger.info(f"Dask dashboard: http://localhost:8787/status")
+
+    process_data()
+
+    client.close()
