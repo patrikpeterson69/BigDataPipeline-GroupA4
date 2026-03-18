@@ -1,5 +1,6 @@
 import time
 import dask.dataframe as dd
+from dask.distributed import Client
 import pandas as pd
 import requests
 from pathlib import Path
@@ -29,117 +30,75 @@ def process_data(input_path=None, output_path=None):
     # Ta bort rader där viktiga kolumner är tomma (Null)
     logger.info("Rensar bort ogiltig data (Null-värden)...")
     t0 = time.time()
-    df_clean = df.dropna(subset=["base_passenger_fare", "PULocationID", "DOLocationID"])
-    df_clean = df_clean[df_clean["base_passenger_fare"] > 0]
     # Alternativ med query som är en dask operation
-    #df_clean = (
-        #df
-        #.dropna()
-        #.query("base_passenger_fare > 0")
-        #.groupby("PULocationID")["base_passenger_fare"]
-        #.agg(["count", "sum"])
-        #.compute()
-        #.reset_index()
-    #)
+    df_clean = (
+        df
+        .dropna()
+        .query("base_passenger_fare > 0")
+        .groupby("PULocationID")["base_passenger_fare"]
+        .agg(["count", "sum"])
+        .compute()
+        .reset_index()
+    )
     timings["Filtrering + dropna"] = time.time() - t0
     logger.info(f"[TIMING] Filtrering + dropna: {timings['Filtrering + dropna']:.2f}s")
 
     # Ladda ner zonfilen om den saknas
     zone_file = BASE_DIR / "data" / "taxi_zone_lookup.csv"
-    #Koden nedan bör inte behöva användas längre eftersom ingest.py redan laddar ner filen
-    #if not zone_file.exists():
-        #logger.info("Laddar ner taxi_zone_lookup.csv...")
-        #r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
-        #zone_file.write_bytes(r.content)
+
 
     # Läs och rensa zon-data för att matcha Spark-skriptets logik (robusthet)
     zones = pd.read_csv(str(zone_file))
     # Ett möjligt alternativ är att göra all rensning i samma steg.
-    #zones_clean = (zones
-        #.dropna()
-        #.drop_duplicates(subset=["LocationID"])
-        #.rename(columns={
-        #    "LocationID": "PULocationID",
-        #    "Zone": "pickup_zone",
-        #    "Borough": "pickup_borough"
-        #})
-        #)
-    zones_clean = zones[["LocationID", "Zone", "Borough"]].dropna().drop_duplicates(subset=["LocationID"])
-    zones_pu = zones_clean.rename(columns={
-        "LocationID": "PULocationID",
-        "Zone": "pickup_zone",
-        "Borough": "pickup_borough"
-    })
+    zones_clean = (zones
+        .dropna()
+        .drop_duplicates(subset=["LocationID"])
+        .rename(columns={
+            "LocationID": "PULocationID",
+            "Zone": "pickup_zone",
+            "Borough": "pickup_borough"
+        })
+        )
 
     # Aggregation: aggregera per PULocationID först (numeriska ID:n, litet resultat)
     # Joina sedan zones på det lilla aggregerade resultatet (~265 rader) istället för på hela datasetet
     logger.info("Aggregerar data per borough...")
     t0 = time.time()
-    agg_by_loc = (
-        df_clean.groupby("PULocationID")["base_passenger_fare"]
-        .agg(["count", "sum"])
-        .compute()
-        .reset_index()
-    )
-    agg_by_loc = agg_by_loc.merge(zones_pu[["PULocationID", "pickup_borough"]], on="PULocationID", how="left")
+
+    # Alternativ till att lägga df_agg i samma kod steg.
     df_agg = (
-        agg_by_loc.groupby("pickup_borough")
+        df_clean
+        .merge(zones_clean[["PULocationID", "pickup_borough"]], on="PULocationID", how="left")
+        .groupby("pickup_borough")
         .agg(antal_resor=("count", "sum"), total_fare=("sum", "sum"))
+        .assign(snitt_pris=lambda x: (x["total_fare"] / x["antal_resor"]).round(2))
+        .drop(columns=["total_fare"])
+        .sort_values("antal_resor", ascending=False)
         .reset_index()
     )
-    df_agg["snitt_pris"] = (df_agg["total_fare"] / df_agg["antal_resor"]).round(2)
-    df_agg = df_agg.drop(columns="total_fare").sort_values("antal_resor", ascending=False)
+
     timings["Aggregation per borough"] = time.time() - t0
     logger.info(f"[TIMING] Aggregation per borough: {timings['Aggregation per borough']:.2f}s")
     print(df_agg.to_string(index=False))
-    # Alternativ till att lägga df_agg i samma kod steg.
-    #df_agg = (
-    #    agg_by_loc
-    #    .merge(zones_pu[["PULocationID", "pickup_borough"]], on="PULocationID", how="left")
-    #    .groupby("pickup_borough")
-    #    .agg(antal_resor=("count", "sum"), total_fare=("sum", "sum"))
-    #    .assign(snitt_pris=lambda x: (x["total_fare"] / x["antal_resor"]).round(2))
-    #    .drop(columns=["total_fare"])
-    #    .sort_values("antal_resor", ascending=False)
-    #    .reset_index()
-    #)
     # Window function: aggregera per (PULocationID) → joina zones → ranka per borough
     logger.info("Kör window function - rankar zoner per borough...")
     t0 = time.time()
     zone_counts_by_loc = (
-        df_clean.groupby("PULocationID")
-        .size()
-        .compute()
-        .reset_index()
-        .rename(columns={0: "antal_resor"})
+        df_clean[["PULocationID", "count"]]
+        .rename(columns={"count": "antal_resor"})
     )
-    zone_counts = zone_counts_by_loc.merge(zones_pu, on="PULocationID", how="left").dropna(subset=["pickup_borough", "pickup_zone"])
-    zone_counts["rank"] = (
-        zone_counts.groupby("pickup_borough")["antal_resor"]
-        .rank(method="min", ascending=False)
-        .astype(int)
+    df_ranked = (
+        zone_counts_by_loc
+        .merge(zones_clean, on="PULocationID", how="left")
+        .dropna(subset=["pickup_borough", "pickup_zone"]) 
+        .assign(rank=lambda x: x.groupby("pickup_borough")["antal_resor"]
+                                .rank(method="min", ascending=False).astype(int))
+        .query("rank <= 3") 
+        .sort_values(["pickup_borough", "rank"])
     )
-    df_ranked = zone_counts[zone_counts["rank"] <= 3].sort_values(["pickup_borough", "rank"])
     timings["Window function"] = time.time() - t0
     logger.info(f"[TIMING] Window function: {timings['Window function']:.2f}s")
     print(df_ranked.to_string(index=False))
-    #zone_counts_by_loc = (
-    #    df_clean.groupby("PULocationID")
-    #    .size()
-    #    .compute()
-    #    .reset_index(name="antal_resor") 
-    #)
-    
-    # 2. Pandas-delen: Merge, droppa nulls, ranka, filtrera och sortera - i ETT flöde
-    #df_ranked = (
-    #    zone_counts_by_loc
-    #    .merge(zones_pu, on="PULocationID", how="left")
-    #    .dropna(subset=["pickup_borough", "pickup_zone"]) frågan är om man ens behöver dropna här.
-    #    .assign(rank=lambda x: x.groupby("pickup_borough")["antal_resor"]
-    #                            .rank(method="min", ascending=False).astype(int))
-    #    .query("rank <= 3") 
-    #    .sort_values(["pickup_borough", "rank"])
-    #)
 
     # Spara resultat
     processed_dir = DATA_DIR / "processed"
@@ -159,8 +118,7 @@ def process_data(input_path=None, output_path=None):
 
 
 if __name__ == "__main__":
-    from dask.distributed import Client
-
+    
     client = Client(n_workers=8, threads_per_worker=4, processes=False, memory_limit=0, dashboard_address="localhost:8787")
     logger.info(f"Dask dashboard: http://localhost:8787/status")
 
