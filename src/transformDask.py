@@ -36,6 +36,10 @@ def process_data(input_path=None, output_path=None):
         #df
         #.dropna()
         #.query("base_passenger_fare > 0")
+        #.groupby("PULocationID")["base_passenger_fare"]
+        #.agg(["count", "sum"])
+        #.compute()
+        #.reset_index()
     #)
     timings["Filtrering + dropna"] = time.time() - t0
     logger.info(f"[TIMING] Filtrering + dropna: {timings['Filtrering + dropna']:.2f}s")
