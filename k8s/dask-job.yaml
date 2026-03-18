@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dask-transform
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: dask-transform
+          image: dask-transform:latest
+          imagePullPolicy: Never        # använd lokal image från minikube
+          resources:
+            requests:
+              memory: "10Gi"
+              cpu: "2"
+            limits:
+              memory: "14Gi"
+              cpu: "4"
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          hostPath:
+            path: /mnt/data            # minikube mount pekar hit (se steg 3 nedan)
+            type: Directory
