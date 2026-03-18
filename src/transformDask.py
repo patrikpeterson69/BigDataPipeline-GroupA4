@@ -46,10 +46,11 @@ def process_data(input_path=None, output_path=None):
 
     # Ladda ner zonfilen om den saknas
     zone_file = BASE_DIR / "data" / "taxi_zone_lookup.csv"
-    if not zone_file.exists():
-        logger.info("Laddar ner taxi_zone_lookup.csv...")
-        r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
-        zone_file.write_bytes(r.content)
+    #Koden nedan bör inte behöva användas längre eftersom ingest.py redan laddar ner filen
+    #if not zone_file.exists():
+        #logger.info("Laddar ner taxi_zone_lookup.csv...")
+        #r = requests.get("https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv")
+        #zone_file.write_bytes(r.content)
 
     # Läs och rensa zon-data för att matcha Spark-skriptets logik (robusthet)
     zones = pd.read_csv(str(zone_file))
