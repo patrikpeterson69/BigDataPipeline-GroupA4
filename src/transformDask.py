@@ -136,7 +136,7 @@ def process_data(input_path=None, output_path=None):
     #    .dropna(subset=["pickup_borough", "pickup_zone"]) frågan är om man ens behöver dropna här.
     #    .assign(rank=lambda x: x.groupby("pickup_borough")["antal_resor"]
     #                            .rank(method="min", ascending=False).astype(int))
-    #    .query("rank <= 3") # .query() är fantastiskt för att byta ut hakparentes-filtrering
+    #    .query("rank <= 3") 
     #    .sort_values(["pickup_borough", "rank"])
     #)
 
